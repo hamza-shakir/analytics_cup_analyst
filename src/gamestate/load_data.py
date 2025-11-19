@@ -3,6 +3,17 @@ import numpy as np
 import requests
 
 
+# ----------------------------------------------------------
+# internal caches (module-level)
+# persists as long as Python process lives
+# ----------------------------------------------------------
+
+_tracking_cache = {}
+_meta_cache = {}
+_enriched_cache = {}
+_events_cache = {}
+
+
 #
 def time_to_seconds(time_str):
     if time_str is None:
@@ -22,6 +33,10 @@ def time_to_minutes(time_str):
 
 #
 def load_tracking_data(match_id):
+    # Check cache first, in case it was already loaded in previous calls
+    if match_id in _tracking_cache:
+        return _tracking_cache[match_id]
+    
     # Load tracking data from GitHub URL
     tracking_data_github_url = f"https://media.githubusercontent.com/media/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_tracking_extrapolated.jsonl"  # Data is stored using GitLFS
     raw_data = pd.read_json(tracking_data_github_url, lines=True)
@@ -53,12 +68,19 @@ def load_tracking_data(match_id):
     # Add the match_id identifier to your dataframe
     raw_df["match_id"] = match_id
     tracking_df = raw_df.copy()
+
+    # Store in cache, if this is the first session-run
+    _tracking_cache[match_id] = tracking_df
     
     return tracking_df
 
 
 #
 def load_meta_data(match_id):
+    # Check cache first, in case it was already loaded in previous calls
+    if match_id in _meta_cache:
+        return _meta_cache[match_id]
+
     # Load meta data from GitHub URL
     meta_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_match.json"
     # Read the JSON data as a JSON object
@@ -178,11 +200,18 @@ def load_meta_data(match_id):
     ]
     players_df = players_df[columns_to_keep]
 
+    # Store in cache, if this is the first session-run
+    _meta_cache[match_id] = players_df
+
     return players_df
 
 
 #
 def load_enriched_tracking_data(match_id):
+    # Check cache first, in case it was already loaded in previous calls
+    if match_id in _enriched_cache:
+        return _enriched_cache[match_id]
+    
     # loading relevant data
     tracking_df = load_tracking_data(match_id)
     players_df = load_meta_data(match_id)
@@ -202,12 +231,19 @@ def load_enriched_tracking_data(match_id):
             'sub_in'
         )
     )
-    
+
+    # Store in cache, if this is the first session-run
+    _enriched_cache[match_id] = enriched_tracking_data
+
     return enriched_tracking_data
 
 
 #
 def load_event_data(match_id, enriched_tracking_data):
+    # Check cache first, in case it was already loaded in previous calls
+    if match_id in _events_cache:
+        return _events_cache[match_id]
+    
     # Load event data from GitHub URL
     event_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_dynamic_events.csv"
     raw_event_df = pd.read_csv(event_data_github_url)
@@ -288,5 +324,8 @@ def load_event_data(match_id, enriched_tracking_data):
 
     # Build the goal_event_df using the stored column list and reset index for convenience
     goal_event_df = df_from_start[mask][cols].reset_index(drop=True)
+
+    # Store in cache, if this is the first session-run
+    _events_cache[match_id] = goal_event_df
 
     return goal_event_df
