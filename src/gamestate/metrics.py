@@ -55,7 +55,7 @@ def average_positions(
             - frames_visible: Number of frames player appeared in
     
     Example:
-        >>> drawing_segment = segments.by_game_state(1886347, state='drawing', team='home')
+        >>> drawing_segment = segments.segment_by_game_state(1886347, state='drawing', team='home')
         >>> positions = average_positions(drawing_segment, team='home')
         >>> print(positions[['name', 'number', 'avg_x', 'avg_y']])
     """
