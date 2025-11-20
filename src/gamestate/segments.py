@@ -13,7 +13,7 @@ Returns kloppy datasets (filtered) for maximum flexibility.
 import pandas as pd
 import numpy as np
 from typing import Union, Dict, List, Tuple, Optional
-from .load_data_v2 import (
+from .load_data import (
     load_tracking_dataset,
     load_event_data,
     to_long_dataframe
