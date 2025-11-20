@@ -24,7 +24,7 @@ from .load_data import (
 # Core Segmentation: By Game State
 # ----------------------------------------------------------
 
-def by_game_state(
+def segment_by_game_state(
     match_id: Union[int, str],
     state: str = 'drawing',
     team: str = 'home',
@@ -44,11 +44,11 @@ def by_game_state(
     
     Example:
         >>> # Get frames where home team is winning
-        >>> winning_segment = by_game_state(1886347, state='winning', team='home')
+        >>> winning_segment = segment_by_game_state(1886347, state='winning', team='home')
         >>> print(f"Frames when winning: {len(winning_segment.records)}")
         
         >>> # Get as DataFrame
-        >>> winning_df = by_game_state(1886347, state='winning', team='home', 
+        >>> winning_df = segment_by_game_state(1886347, state='winning', team='home', 
         ...                             return_format='dataframe')
     
     Note:
@@ -106,7 +106,7 @@ def get_all_game_states(
     """
     Get segments for ALL game states (drawing, winning, losing).
     
-    Convenience function that calls by_game_state() for each state.
+    Convenience function that calls segment_by_game_state() for each state.
     
     Args:
         match_id: Match identifier
@@ -129,7 +129,7 @@ def get_all_game_states(
     
     result = {}
     for state in states:
-        segment = by_game_state(match_id, state=state, team=team, return_format=return_format)
+        segment = segment_by_game_state(match_id, state=state, team=team, return_format=return_format)
         
         # Only include states that have frames
         if return_format == 'dataset':
@@ -194,7 +194,7 @@ def get_game_state_summary(
 # Time-Based Segmentation
 # ----------------------------------------------------------
 
-def by_time_window(
+def segment_by_time_window(
     match_id: Union[int, str],
     start_minute: float,
     end_minute: float,
@@ -214,10 +214,10 @@ def by_time_window(
     
     Example:
         >>> # Get first 15 minutes
-        >>> first_15 = by_time_window(1886347, start_minute=0, end_minute=15)
+        >>> first_15 = segment_by_time_window(1886347, start_minute=0, end_minute=15)
         
         >>> # Get 30-45 minute period
-        >>> mid_half = by_time_window(1886347, start_minute=30, end_minute=45)
+        >>> mid_half = segment_by_time_window(1886347, start_minute=30, end_minute=45)
     """
     dataset = load_tracking_dataset(match_id)
     
@@ -236,7 +236,7 @@ def by_time_window(
     return filtered_dataset
 
 
-def by_time_windows(
+def segment_by_time_windows(
     match_id: Union[int, str],
     window_minutes: int = 15,
     return_format: str = 'dataset'
@@ -254,7 +254,7 @@ def by_time_windows(
         Keys like: '0-15', '15-30', '30-45', etc.
     
     Example:
-        >>> windows = by_time_windows(1886347, window_minutes=15)
+        >>> windows = segment_by_time_windows(1886347, window_minutes=15)
         >>> for label, segment in windows.items():
         ...     print(f"{label}: {len(segment.records)} frames")
         0-15: 9000 frames
@@ -276,7 +276,7 @@ def by_time_windows(
         end = min(start + window_minutes, total_minutes)
         label = f"{int(start)}-{int(end)}"
         
-        segment = by_time_window(match_id, start, end, return_format=return_format)
+        segment = segment_by_time_window(match_id, start, end, return_format=return_format)
         
         # Only include if has frames
         if return_format == 'dataset':
@@ -295,7 +295,7 @@ def by_time_windows(
 # Goal-Context Segmentation
 # ----------------------------------------------------------
 
-def around_goal(
+def segment_around_goal(
     match_id: Union[int, str],
     goal_index: int = 0,
     before_minutes: float = 5,
@@ -317,7 +317,7 @@ def around_goal(
     
     Example:
         >>> # Analyze 5 mins before/after first goal
-        >>> goal_context = around_goal(1886347, goal_index=0, 
+        >>> goal_context = segment_around_goal(1886347, goal_index=0, 
         ...                             before_minutes=5, after_minutes=5)
         >>> before = goal_context['before']
         >>> after = goal_context['after']
@@ -407,7 +407,7 @@ def all_goals_context(
     contexts = []
     for i in range(num_goals):
         try:
-            context = around_goal(
+            context = segment_around_goal(
                 match_id, 
                 goal_index=i,
                 before_minutes=before_minutes,
