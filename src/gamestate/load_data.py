@@ -8,6 +8,7 @@ Provides helpers to convert to pandas when needed.
 
 import pandas as pd
 import numpy as np
+import requests
 from kloppy import skillcorner
 from kloppy.domain import Orientation
 
@@ -45,12 +46,47 @@ def load_tracking_dataset(match_id, only_alive=True, normalize_orientation=False
     if cache_key in _dataset_cache:
         return _dataset_cache[cache_key]
     
-    # Load with kloppy
-    dataset = skillcorner.load_open_data(
-        match_id=str(match_id),
-        only_alive=only_alive,
-        coordinates="skillcorner"  # Keep SkillCorner's native coordinates
-    )
+    # Try loading with different methods for compatibility
+    dataset = None
+    last_error = None
+    
+    # Method 1: Without coordinates parameter (newer kloppy versions)
+    try:
+        dataset = skillcorner.load_open_data(
+            match_id=str(match_id),
+            only_alive=only_alive
+        )
+    except Exception as e:
+        last_error = e
+        
+        # Method 2: With coordinates parameter (older kloppy versions)
+        try:
+            dataset = skillcorner.load_open_data(
+                match_id=str(match_id),
+                only_alive=only_alive,
+                coordinates="skillcorner"
+            )
+            last_error = None
+        except Exception as e2:
+            last_error = e2
+    
+    # If both methods failed, raise clear error
+    if dataset is None:
+        error_msg = f"""
+Failed to load tracking data for match {match_id}.
+
+Error: {str(last_error)}
+
+Possible solutions:
+1. Update kloppy: pip install --upgrade kloppy
+2. Check match ID exists: https://github.com/SkillCorner/opendata
+3. Check your internet connection
+
+Kloppy version issues:
+- If using kloppy >= 3.0: Should work without 'coordinates' parameter
+- If using kloppy < 3.0: May need 'coordinates="skillcorner"' parameter
+"""
+        raise Exception(error_msg)
     
     # Normalize orientation if requested
     if normalize_orientation:
@@ -120,6 +156,10 @@ def get_metadata(match_id):
     """
     Get match metadata in easily accessible format.
     
+    Uses hybrid approach:
+    - SkillCorner JSON for reliable player information (especially GK detection)
+    - Kloppy dataset for accurate frame_rate and frame counts
+    
     Returns:
         dict: Contains teams, players, frame_rate, etc.
     
@@ -127,44 +167,75 @@ def get_metadata(match_id):
         >>> meta = get_metadata(1886347)
         >>> print(meta['home_team']['name'])
         >>> print(f"Frame rate: {meta['frame_rate']} fps")
+        >>> 
+        >>> # Get GK for home team
+        >>> home_gk = [p for p in meta['home_team']['players'] if p['is_gk']]
+        >>> print(f"Goalkeeper: {home_gk[0]['name']} (#{home_gk[0]['jersey_no']})")
     """
+    # ========== LOAD KLOPPY DATASET FOR FRAME INFO ==========
     dataset = load_tracking_dataset(match_id)
     metadata = dataset.metadata
+    # ========================================================
+    
+    # ========== LOAD SKILLCORNER JSON FOR PLAYER DATA ==========
+    meta_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_match.json"
+    
+    # Read the JSON data
+    response = requests.get(meta_data_github_url)
+    raw_match_data = response.json()
+    
+    # Process nested JSON elements
+    raw_match_df = pd.json_normalize(raw_match_data, max_level=2)
+    raw_match_df["home_team_side"] = raw_match_df["home_team_side"].astype(str)
+    
+    # Extract players data
+    players_df = pd.json_normalize(
+        raw_match_df.to_dict("records"),
+        record_path="players",
+        meta=[
+            "home_team.name",
+            "home_team.id",
+            "away_team.name",
+            "away_team.id",
+        ],
+    )
+    
+    # Create GK flag - RELIABLE!
+    players_df["is_gk"] = players_df["player_role.acronym"] == "GK"
+    # ===========================================================
+    
+    # Separate home and away players
+    home_team_id = raw_match_data["home_team"]["id"]
+    away_team_id = raw_match_data["away_team"]["id"]
+    
+    home_players_df = players_df[players_df["team_id"] == home_team_id]
+    away_players_df = players_df[players_df["team_id"] == away_team_id]
+    
+    # Helper function to convert player row to dict
+    def player_to_dict(row):
+        return {
+            'id': int(row['id']),
+            'name': row['short_name'],
+            'full_name': f"{row['first_name']} {row['last_name']}",
+            'jersey_no': int(row['number']),
+            'position': row['player_role.name'] if pd.notna(row.get('player_role.name')) else None,
+            'is_gk': bool(row['is_gk'])  # ← RELIABLE from SkillCorner JSON!
+        }
     
     return {
         'home_team': {
-            'id': metadata.teams[0].team_id,
-            'name': metadata.teams[0].name,
-            'players': [
-                {
-                    'id': p.player_id,
-                    'name': p.name,
-                    'full_name': p.full_name,
-                    'jersey_no': p.jersey_no,
-                    'position': str(p.starting_position) if p.starting_position else None,
-                    'is_gk': p.starting_position and 'Goalkeeper' in str(p.starting_position)
-                }
-                for p in metadata.teams[0].players
-            ]
+            'id': home_team_id,
+            'name': raw_match_data["home_team"]["name"],
+            'players': [player_to_dict(row) for _, row in home_players_df.iterrows()]
         },
         'away_team': {
-            'id': metadata.teams[1].team_id,
-            'name': metadata.teams[1].name,
-            'players': [
-                {
-                    'id': p.player_id,
-                    'name': p.name,
-                    'full_name': p.full_name,
-                    'jersey_no': p.jersey_no,
-                    'position': str(p.starting_position) if p.starting_position else None,
-                    'is_gk': p.starting_position and 'Goalkeeper' in str(p.starting_position)
-                }
-                for p in metadata.teams[1].players
-            ]
+            'id': away_team_id,
+            'name': raw_match_data["away_team"]["name"],
+            'players': [player_to_dict(row) for _, row in away_players_df.iterrows()]
         },
-        'frame_rate': metadata.frame_rate,
-        'total_frames': len(dataset.records),
-        'duration_minutes': len(dataset.records) / metadata.frame_rate / 60
+        'frame_rate': metadata.frame_rate,  # ← From Kloppy (accurate)
+        'total_frames': len(dataset.records),  # ← From Kloppy (accurate)
+        'duration_minutes': len(dataset.records) / metadata.frame_rate / 60  # ← Calculated from Kloppy
     }
 
 
@@ -247,8 +318,28 @@ def to_long_dataframe(dataset, match_id):
     Note:
         Use this if you need player-centric analysis or compatibility with
         existing code that expects long format.
+        
+        COORDINATES: Automatically scales from normalized (0-1) to meters.
+        
+        GK & POSITION: Uses SkillCorner JSON for reliable data (same as get_metadata).
     """
     wide_df = dataset.to_df()
+    
+    # Check if coordinates are normalized and get pitch dimensions
+    pitch_length = 105  # Default SkillCorner
+    pitch_width = 68
+    coordinates_are_normalized = False
+    
+    if hasattr(dataset.metadata, 'coordinate_system'):
+        coord_sys = dataset.metadata.coordinate_system
+        if hasattr(coord_sys, 'pitch_dimensions'):
+            dims = coord_sys.pitch_dimensions
+            if hasattr(dims, 'pitch_length'):
+                pitch_length = dims.pitch_length
+            if hasattr(dims, 'pitch_width'):
+                pitch_width = dims.pitch_width
+            if hasattr(dims, 'unit') and 'NORMED' in str(dims.unit):
+                coordinates_are_normalized = True
     
     # Extract player IDs from columns
     player_columns = {}
@@ -262,34 +353,83 @@ def to_long_dataframe(dataset, match_id):
                 's': f'{player_id}_s'
             }
     
-    # Get metadata
+    # Get metadata from kloppy
     home_team = dataset.metadata.teams[0]
     away_team = dataset.metadata.teams[1]
+    
+    # ========== GET RELIABLE is_gk AND position FROM SKILLCORNER JSON ==========
+    skillcorner_player_data = {}  # player_id -> {is_gk, position}
+    
+    try:
+        meta_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_match.json"
+        response = requests.get(meta_data_github_url)
+        raw_match_data = response.json()
+        
+        # Extract players
+        raw_match_df = pd.json_normalize(raw_match_data, max_level=2)
+        players_df = pd.json_normalize(
+            raw_match_df.to_dict("records"),
+            record_path="players"
+        )
+        
+        # Create lookup with is_gk AND position - RELIABLE!
+        players_df["is_gk"] = players_df["player_role.acronym"] == "GK"
+        
+        for _, row in players_df.iterrows():
+            skillcorner_player_data[str(row["id"])] = {
+                'is_gk': bool(row["is_gk"]),
+                'position': row["player_role.name"] if pd.notna(row.get("player_role.name")) else None
+            }
+        
+    except Exception as e:
+        print(f"⚠ Warning: Could not load SkillCorner JSON: {e}")
+        print("  Falling back to Kloppy metadata (may be unreliable)")
+    # ===========================================================================
     
     # Build player metadata lookup
     player_meta = {}
     for team in dataset.metadata.teams:
         for player in team.players:
-            player_meta[str(player.player_id)] = {
+            player_id_str = str(player.player_id)
+            
+            # Use SkillCorner JSON if available, fallback to Kloppy
+            if player_id_str in skillcorner_player_data:
+                # Use SkillCorner data - RELIABLE!
+                is_gk = skillcorner_player_data[player_id_str]['is_gk']
+                position = skillcorner_player_data[player_id_str]['position']
+            else:
+                # Fallback to Kloppy metadata (unreliable)
+                is_gk = player.starting_position and 'Goalkeeper' in str(player.starting_position)
+                position = str(player.starting_position) if player.starting_position else None
+            
+            player_meta[player_id_str] = {
                 'player_id': player.player_id,
                 'short_name': player.name,
                 'number': player.jersey_no,
                 'team_id': team.team_id,
                 'team_name': team.name,
-                'is_gk': player.starting_position and 'Goalkeeper' in str(player.starting_position),
-                'position': str(player.starting_position) if player.starting_position else None,
+                'is_gk': is_gk,        # ← NOW RELIABLE!
+                'position': position,   # ← NOW RELIABLE!
             }
     
     # Convert to long format
     long_rows = []
     
     for idx, row in wide_df.iterrows():
+        # Scale ball coordinates if normalized
+        ball_x = row['ball_x']
+        ball_y = row['ball_y']
+        
+        if coordinates_are_normalized and pd.notna(ball_x) and pd.notna(ball_y):
+            ball_x = (ball_x * pitch_length) - (pitch_length / 2)
+            ball_y = (ball_y * pitch_width) - (pitch_width / 2)
+        
         frame_data = {
             'frame': row['frame_id'],
             'timestamp': row['timestamp'],
             'period': row['period_id'],
-            'ball_x': row['ball_x'],
-            'ball_y': row['ball_y'],
+            'ball_x': ball_x,
+            'ball_y': ball_y,
             'ball_z': row.get('ball_z'),
             'ball_state': row.get('ball_state'),
         }
@@ -306,15 +446,23 @@ def to_long_dataframe(dataset, match_id):
         # Add row for each visible player
         for player_id, cols in player_columns.items():
             if pd.notna(row.get(cols['x'])):
+                player_x = row[cols['x']]
+                player_y = row[cols['y']]
+                
+                # Scale player coordinates if normalized
+                if coordinates_are_normalized:
+                    player_x = (player_x * pitch_length) - (pitch_length / 2)
+                    player_y = (player_y * pitch_width) - (pitch_width / 2)
+                
                 player_row = frame_data.copy()
                 player_row.update({
                     'player_id': player_id,
-                    'x': row[cols['x']],
-                    'y': row[cols['y']],
+                    'x': player_x,
+                    'y': player_y,
                     'is_detected': True,
                 })
                 
-                # Add player metadata
+                # Add player metadata (now with reliable is_gk and position!)
                 if player_id in player_meta:
                     player_row.update(player_meta[player_id])
                 
