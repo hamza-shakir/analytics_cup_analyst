@@ -22,8 +22,7 @@ from .load_data import (
 # Match context (flat)
 from .context import (
     summary,
-    score_progression,
-    substitutions,
+    score_progression
 )
 
 # Segmentation (flat)
@@ -77,8 +76,7 @@ __all__ = [
     
     # Context (flat)
     "summary",
-    "score_progression",
-    "substitutions",
+    "score_progression"
     
     # Segmentation (flat)
     "segment_by_game_state",
