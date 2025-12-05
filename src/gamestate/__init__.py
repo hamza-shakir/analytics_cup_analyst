@@ -11,6 +11,7 @@ Provides tools for:
 from .load_data import (
     load_tracking_dataset,
     load_event_data,
+    load_phases_data,
     get_metadata,
     list_players,
     to_wide_dataframe,
@@ -27,6 +28,7 @@ from .context import (
 
 # Segmentation (flat)
 from .segments import (
+    get_full_match,
     segment_by_game_state,
     get_all_game_states,
     get_game_state_summary,
@@ -34,6 +36,24 @@ from .segments import (
     segment_by_time_windows,
     segment_around_goal,
     all_goals_context,
+)
+
+# Filters
+from .filters import (
+    filter_by_ip_phase,
+    filter_by_oop_phase,
+    filter_by_pitch_third,
+    filter_by_game_state,
+)
+
+# Helper
+from .helpers import (
+    has_frames,
+    get_frame_count,
+    check_segment,
+    filter_all_segments,
+    analyze_all_segments,
+    diagnose_filters,
 )
 
 # Metrics (flat)
@@ -67,6 +87,7 @@ __all__ = [
     # Data loading (grouped namespace)
     "load_tracking_dataset",
     "load_event_data",
+    "load_phases_data",
     "get_metadata",
     "list_players",
     "to_wide_dataframe",
@@ -79,6 +100,7 @@ __all__ = [
     "score_progression"
     
     # Segmentation (flat)
+    "get_full_match",
     "segment_by_game_state",
     "get_all_game_states",
     "get_game_state_summary",
@@ -86,7 +108,21 @@ __all__ = [
     "segment_by_time_windows",
     "segment_around_goal",
     "all_goals_context",
-    
+
+    # Filters (flat)
+    "filter_by_ip_phase",
+    "filter_by_oop_phase",
+    "filter_by_pitch_third",
+    "filter_by_game_state",
+
+    # Helpers (flat)
+    "has_frames",
+    "get_frame_count",
+    "check_segment",
+    "filter_all_segments",
+    "analyze_all_segments",
+    "diagnose_filters",
+
     # Metrics (flat)
     "average_positions",
     "team_compactness",
