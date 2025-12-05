@@ -1,7 +1,7 @@
 """
-load_data.py - Kloppy-native data loading
+load_data.py - Kloppy-native data loading WITH PHASES SUPPORT
 
-This module loads SkillCorner tracking and event data using kloppy.
+This module loads SkillCorner tracking, event, and phases data using kloppy.
 Returns kloppy dataset objects for maximum flexibility.
 Provides helpers to convert to pandas when needed.
 """
@@ -18,6 +18,7 @@ from kloppy.domain import Orientation
 # ----------------------------------------------------------
 _dataset_cache = {}
 _event_cache = {}
+_phases_cache = {}  # NEW: Cache for phases data
 
 
 # ----------------------------------------------------------
@@ -146,6 +147,115 @@ def load_event_data(match_id):
     
     _event_cache[match_id] = events_df
     return events_df
+
+
+def load_phases_data(match_id):
+    """
+    Load SkillCorner phases-of-play CSV.
+    
+    Args:
+        match_id: Match identifier
+    
+    Returns:
+        pandas.DataFrame: Phases with tactical context, spatial data, outcomes
+    
+    Columns include:
+        Possession:
+            - team_in_possession_id, team_in_possession_shortname
+        
+        Phase types:
+            - team_in_possession_phase_type: build_up, create, finish, direct, 
+              chaotic, set_play, transition, quick_break
+            - team_out_of_possession_phase_type: high_block, medium_block, low_block,
+              defending_direct, defending_set_play, defending_transition, 
+              defending_quick_break, chaotic
+        
+        Spatial data:
+            - x_start, x_end, y_start, y_end
+            - channel_id_start, channel_id_end, channel_start, channel_end
+            - third_id_start, third_id_end, third_start, third_end
+            - penalty_area_start, penalty_area_end
+        
+        Team shape:
+            - team_in_possession_width_start/end
+            - team_in_possession_length_start/end
+            - team_out_of_possession_width_start/end
+            - team_out_of_possession_length_start/end
+        
+        Temporal:
+            - frame_start, frame_end
+            - time_start, time_end
+            - minute_start, second_start
+            - duration
+            - period
+        
+        Outcomes:
+            - team_possession_loss_in_phase (bool)
+            - team_possession_lead_to_goal (bool)
+            - team_possession_lead_to_shot (bool)
+    
+    Example:
+        >>> import gamestate as gs
+        >>> 
+        >>> # Load phases data
+        >>> phases = gs.load_phases_data(1886347)
+        >>> print(f"Loaded {len(phases)} possession phases")
+        >>> 
+        >>> # Get all build-up phases for home team
+        >>> home_team_id = phases['home_team.id'].iloc[0]
+        >>> home_buildups = phases[
+        ...     (phases['team_in_possession_id'] == home_team_id) &
+        ...     (phases['team_in_possession_phase_type'] == 'build_up')
+        ... ]
+        >>> print(f"Home team build-up phases: {len(home_buildups)}")
+        >>> 
+        >>> # Analyze defensive phases
+        >>> high_blocks = phases[
+        ...     phases['team_out_of_possession_phase_type'] == 'high_block'
+        ... ]
+        >>> print(f"High block defensive phases: {len(high_blocks)}")
+    
+    Note:
+        Phases data may not be available for all matches.
+        If unavailable, returns empty DataFrame with warning.
+    """
+    # Check if already cached
+    if match_id in _phases_cache:
+        return _phases_cache[match_id]
+    
+    # Try loading from SkillCorner opendata
+    phases_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_phases_of_play.csv"
+    
+    try:
+        phases_df = pd.read_csv(phases_url)
+        print(f"✅ Loaded {len(phases_df)} phases for match {match_id}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not load phases data for match {match_id}")
+        print(f"   Error: {str(e)[:100]}")
+        print(f"   Note: Phases data may not be available for all matches")
+        print(f"   Phase-based filters will return empty segments for this match")
+        return pd.DataFrame()
+    
+    # Get team info from tracking dataset
+    try:
+        dataset = load_tracking_dataset(match_id)
+        home_team = dataset.metadata.teams[0]
+        away_team = dataset.metadata.teams[1]
+        
+        # Add team identifiers for easier filtering
+        phases_df['home_team.id'] = home_team.team_id
+        phases_df['away_team.id'] = away_team.team_id
+        phases_df['home_team.name'] = home_team.name
+        phases_df['away_team.name'] = away_team.name
+        
+        print(f"   Home: {home_team.name}")
+        print(f"   Away: {away_team.name}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not add team metadata: {e}")
+    
+    # Cache and return
+    _phases_cache[match_id] = phases_df
+    return phases_df
 
 
 # ----------------------------------------------------------
