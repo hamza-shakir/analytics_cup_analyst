@@ -19,6 +19,50 @@ from .load_data import (
 
 
 # ----------------------------------------------------------
+# Helper: Get Full Match
+# ----------------------------------------------------------
+
+def get_full_match(match_id: Union[int, str], only_alive: bool = True) -> 'TrackingDataset':
+    """
+    Get full match as TrackingDataset for filtering.
+    
+    This is the recommended starting point for filter-based analysis.
+    Loads the entire match tracking data which can then be filtered
+    by game state, phase type, possession, etc.
+    
+    Args:
+        match_id: Match identifier
+        only_alive: If True, only include frames where ball is in play (default: True)
+    
+    Returns:
+        TrackingDataset containing entire match
+    
+    Example - Simple usage:
+        >>> import gamestate as gs
+        >>> 
+        >>> # Get full match
+        >>> segment = gs.get_full_match(1886347)
+        >>> print(f"Total frames: {len(segment.records)}")
+    
+    Example - With filters:
+        >>> # Start with full match
+        >>> segment = gs.get_full_match(1886347)
+        >>> 
+        >>> # Apply filters
+        >>> segment = gs.filter_by_game_state(segment, 'winning', 'home', 1886347)
+        >>> segment = gs.filter_by_phase_type(segment, 'build_up', 'home', 1886347)
+        >>> 
+        >>> # Analyze
+        >>> positions = gs.average_positions(segment, team='home', match_id=1886347)
+    
+    Note:
+        This function is equivalent to load_tracking_dataset() but provides
+        a clearer starting point for filter-based workflows.
+    """
+    return load_tracking_dataset(match_id, only_alive=only_alive)
+
+
+# ----------------------------------------------------------
 # Core Segmentation: By Game State
 # ----------------------------------------------------------
 
@@ -30,6 +74,12 @@ def segment_by_game_state(
     """
     Get frames where specified team is in given game state.
     
+    CONVENIENCE FUNCTION: This is equivalent to:
+        segment = get_full_match(match_id)
+        segment = filter_by_game_state(segment, state, team, match_id)
+    
+    For stacking multiple filters, use filter_by_game_state() directly.
+    
     Args:
         match_id: Match identifier
         state: 'winning', 'drawing', or 'losing'
@@ -38,15 +88,27 @@ def segment_by_game_state(
     Returns:
         TrackingDataset containing only frames in specified state
     
-    Example:
+    Example - Simple usage (recommended for single filter):
         >>> import gamestate as gs
         >>> 
         >>> # Get frames where home team is winning
         >>> winning_segment = gs.segment_by_game_state(1886347, state='winning', team='home')
         >>> print(f"Frames when winning: {len(winning_segment.records)}")
         >>> 
-        >>> # Convert to DataFrame if needed
-        >>> winning_df = gs.to_long_dataframe(winning_segment, 1886347)
+        >>> # Analyze
+        >>> positions = gs.average_positions(winning_segment, team='home', match_id=1886347)
+    
+    Example - Compositional approach (recommended for multiple filters):
+        >>> # Start with full match
+        >>> segment = gs.get_full_match(1886347)
+        >>> 
+        >>> # Stack filters
+        >>> segment = gs.filter_by_game_state(segment, 'winning', 'home', 1886347)
+        >>> segment = gs.filter_by_phase_type(segment, 'build_up', 'home', 1886347)
+        >>> segment = gs.filter_by_third(segment, 'defensive', 'home', 1886347)
+        >>> 
+        >>> # Analyze stacked filters
+        >>> positions = gs.average_positions(segment, team='home', match_id=1886347)
     
     Note:
         Game state is determined from score progression events.
@@ -58,38 +120,48 @@ def segment_by_game_state(
     if team not in ['home', 'away']:
         raise ValueError(f"team must be 'home' or 'away', got '{team}'")
     
-    # Load data
-    dataset = load_tracking_dataset(match_id)
-    events_df = load_event_data(match_id)
+    # Import here to avoid circular dependency
+    try:
+        from .filters import filter_by_game_state as filter_func
+        
+        # Use filter-based approach
+        full = get_full_match(match_id)
+        return filter_func(full, state, team, match_id)
     
-    if events_df.empty:
-        # No events, entire match is drawing
-        if state == 'drawing':
-            return dataset
-        else:
-            # Return empty dataset
+    except ImportError:
+        # Fallback to original implementation if filters not available yet
+        # This ensures backwards compatibility during development
+        dataset = load_tracking_dataset(match_id)
+        events_df = load_event_data(match_id)
+        
+        if events_df.empty:
+            # No events, entire match is drawing
+            if state == 'drawing':
+                return dataset
+            else:
+                # Return empty dataset
+                return dataset.filter(lambda f: False)
+        
+        # Determine frame ranges for each game state
+        state_windows = _get_game_state_windows(events_df, team)
+        
+        # Filter to requested state
+        target_frames = []
+        for window in state_windows:
+            if window['state'] == state:
+                target_frames.extend(range(window['start_frame'], window['end_frame'] + 1))
+        
+        if not target_frames:
+            # No frames in this state
             return dataset.filter(lambda f: False)
-    
-    # Determine frame ranges for each game state
-    state_windows = _get_game_state_windows(events_df, team)
-    
-    # Filter to requested state
-    target_frames = []
-    for window in state_windows:
-        if window['state'] == state:
-            target_frames.extend(range(window['start_frame'], window['end_frame'] + 1))
-    
-    if not target_frames:
-        # No frames in this state
-        return dataset.filter(lambda f: False)
-    
-    # Filter dataset to these frames
-    target_frames_set = set(target_frames)
-    filtered_dataset = dataset.filter(
-        lambda frame: frame.frame_id in target_frames_set
-    )
-    
-    return filtered_dataset
+        
+        # Filter dataset to these frames
+        target_frames_set = set(target_frames)
+        filtered_dataset = dataset.filter(
+            lambda frame: frame.frame_id in target_frames_set
+        )
+        
+        return filtered_dataset
 
 
 def get_all_game_states(
@@ -99,7 +171,7 @@ def get_all_game_states(
     """
     Get segments for ALL game states (drawing, winning, losing).
     
-    Convenience function that calls segment_by_game_state() for each state.
+    Convenience function that calls filter_by_game_state() for each state.
     
     Args:
         match_id: Match identifier
@@ -118,18 +190,43 @@ def get_all_game_states(
         drawing: 25000 frames
         winning: 3000 frames
         losing: 0 frames
+        >>> 
+        >>> # Compare metrics across states
+        >>> for state, segment in segments.items():
+        ...     comp = gs.team_compactness(segment, team='home', match_id=1886347)
+        ...     print(f"{state}: width={comp['width']:.1f}m")
     """
-    states = ['drawing', 'winning', 'losing']
-    
-    result = {}
-    for state in states:
-        segment = segment_by_game_state(match_id, state=state, team=team)
+    # Import here to avoid circular dependency
+    try:
+        from .filters import filter_by_game_state as filter_func
         
-        # Only include states that have frames
-        if len(segment.records) > 0:
-            result[state] = segment
+        # Use filter-based approach
+        full = get_full_match(match_id)
+        states = ['drawing', 'winning', 'losing']
+        
+        result = {}
+        for state in states:
+            segment = filter_func(full, state, team, match_id)
+            
+            # Only include states that have frames
+            if len(segment.records) > 0:
+                result[state] = segment
+        
+        return result
     
-    return result
+    except ImportError:
+        # Fallback to calling segment_by_game_state
+        states = ['drawing', 'winning', 'losing']
+        
+        result = {}
+        for state in states:
+            segment = segment_by_game_state(match_id, state=state, team=team)
+            
+            # Only include states that have frames
+            if len(segment.records) > 0:
+                result[state] = segment
+        
+        return result
 
 
 def get_game_state_summary(
