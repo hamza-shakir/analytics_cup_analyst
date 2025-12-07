@@ -54,6 +54,8 @@ def average_positions(
             - name: Player name
             - number: Jersey number
             - position: Playing position
+            - is_gk: Boolean, True if goalkeeper
+            - sub_status: 'full90', 'subbed_out', 'subbed_in', or 'unused_sub'
             - avg_x: Average x-coordinate (in meters)
             - avg_y: Average y-coordinate (in meters)
             - std_x: Standard deviation of x
@@ -67,6 +69,9 @@ def average_positions(
         >>> 
         >>> # All frames
         >>> all_pos = gs.average_positions(drawing, team='home', match_id=1886347)
+        >>> 
+        >>> # Check substitution status
+        >>> print(all_pos[['name', 'number', 'sub_status', 'avg_x', 'avg_y']])
         >>> 
         >>> # Only when attacking (In Possession)
         >>> ip_pos = gs.average_positions(drawing, team='home', match_id=1886347, possession='ip')
@@ -104,7 +109,7 @@ def average_positions(
     if df.empty:
         print(f"Warning: No data after filtering (team={team}, possession={possession})")
         return pd.DataFrame(columns=[
-            'player_id', 'name', 'number', 'position', 'is_gk',
+            'player_id', 'name', 'number', 'position', 'is_gk', 'sub_status',
             'avg_x', 'avg_y', 'std_x', 'std_y', 'frames_visible'
         ])
     
@@ -118,12 +123,13 @@ def average_positions(
     # Flatten column names
     player_stats.columns = ['player_id', 'avg_x', 'std_x', 'avg_y', 'std_y', 'frames_visible']
     
-    # Add player metadata
+    # Add player metadata (including sub_status)
     player_meta = df.groupby('player_id').agg({
         'short_name': 'first',
         'number': 'first',
         'position': 'first',
-        'is_gk': 'first'
+        'is_gk': 'first',
+        'sub_status': 'first'
     }).reset_index()
     
     # Merge
@@ -132,7 +138,7 @@ def average_positions(
     # Rename and reorder columns
     result = result.rename(columns={'short_name': 'name'})
     result = result[[
-        'player_id', 'name', 'number', 'position', 'is_gk',
+        'player_id', 'name', 'number', 'position', 'is_gk', 'sub_status',
         'avg_x', 'avg_y', 'std_x', 'std_y', 'frames_visible'
     ]]
     
