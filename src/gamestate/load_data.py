@@ -266,86 +266,95 @@ def get_metadata(match_id):
     """
     Get match metadata in easily accessible format.
     
-    Uses hybrid approach:
-    - SkillCorner JSON for reliable player information (especially GK detection)
-    - Kloppy dataset for accurate frame_rate and frame counts
+    Includes substitution status for each player.
     
     Returns:
-        dict: Contains teams, players, frame_rate, etc.
+        dict: Contains teams, players (with sub status), frame_rate, etc.
     
     Example:
         >>> meta = get_metadata(1886347)
-        >>> print(meta['home_team']['name'])
-        >>> print(f"Frame rate: {meta['frame_rate']} fps")
         >>> 
-        >>> # Get GK for home team
-        >>> home_gk = [p for p in meta['home_team']['players'] if p['is_gk']]
-        >>> print(f"Goalkeeper: {home_gk[0]['name']} (#{home_gk[0]['jersey_no']})")
+        >>> # Access player with sub status
+        >>> for player in meta['home_team']['players']:
+        ...     print(f"{player['name']} - {player['sub_status']}")
     """
-    # ========== LOAD KLOPPY DATASET FOR FRAME INFO ==========
+    import requests
+    import pandas as pd
+    
+    # Load Kloppy dataset for frame info
     dataset = load_tracking_dataset(match_id)
     metadata = dataset.metadata
-    # ========================================================
     
-    # ========== LOAD SKILLCORNER JSON FOR PLAYER DATA ==========
+    # Load SkillCorner JSON for player data
     meta_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_match.json"
     
-    # Read the JSON data
     response = requests.get(meta_data_github_url)
     raw_match_data = response.json()
     
-    # Process nested JSON elements
-    raw_match_df = pd.json_normalize(raw_match_data, max_level=2)
-    raw_match_df["home_team_side"] = raw_match_df["home_team_side"].astype(str)
-    
-    # Extract players data
-    players_df = pd.json_normalize(
-        raw_match_df.to_dict("records"),
-        record_path="players",
-        meta=[
-            "home_team.name",
-            "home_team.id",
-            "away_team.name",
-            "away_team.id",
-        ],
+    # Calculate total match duration
+    total_match_minutes = sum(
+        period["duration_minutes"] 
+        for period in raw_match_data["match_periods"]
     )
     
-    # Create GK flag - RELIABLE!
-    players_df["is_gk"] = players_df["player_role.acronym"] == "GK"
-    # ===========================================================
-    
-    # Separate home and away players
+    # Get team IDs
     home_team_id = raw_match_data["home_team"]["id"]
     away_team_id = raw_match_data["away_team"]["id"]
     
-    home_players_df = players_df[players_df["team_id"] == home_team_id]
-    away_players_df = players_df[players_df["team_id"] == away_team_id]
+    # Calculate substitution status for ALL players
+    sub_status_lookup = calculate_substitution_status(
+        raw_match_data["players"], 
+        total_match_minutes
+    )
     
-    # Helper function to convert player row to dict
-    def player_to_dict(row):
+    # Helper function to convert player to dict
+    def player_to_dict(player_data):
+        """Convert player data to dictionary including sub status"""
+        player_id = player_data['id']
+        sub_info = sub_status_lookup[player_id]
+        
         return {
-            'id': int(row['id']),
-            'name': row['short_name'],
-            'full_name': f"{row['first_name']} {row['last_name']}",
-            'jersey_no': int(row['number']),
-            'position': row['player_role.name'] if pd.notna(row.get('player_role.name')) else None,
-            'is_gk': bool(row['is_gk'])  # ← RELIABLE from SkillCorner JSON!
+            'id': int(player_id),
+            'name': player_data['short_name'],
+            'full_name': f"{player_data['first_name']} {player_data['last_name']}",
+            'jersey_no': int(player_data['number']),
+            'position': player_data['player_role']['name'],
+            'is_gk': player_data['player_role']['acronym'] == 'GK',
+            
+            # Substitution information (from calculate_substitution_status)
+            'sub_status': sub_info['sub_status'],
+            'minutes_played': sub_info['minutes_played'],
+            'start_frame': sub_info['start_frame'],
+            'end_frame': sub_info['end_frame']
         }
+    
+    # Process all players
+    home_players = [
+        player_to_dict(p) 
+        for p in raw_match_data["players"] 
+        if p["team_id"] == home_team_id
+    ]
+    
+    away_players = [
+        player_to_dict(p) 
+        for p in raw_match_data["players"] 
+        if p["team_id"] == away_team_id
+    ]
     
     return {
         'home_team': {
             'id': home_team_id,
             'name': raw_match_data["home_team"]["name"],
-            'players': [player_to_dict(row) for _, row in home_players_df.iterrows()]
+            'players': home_players
         },
         'away_team': {
             'id': away_team_id,
             'name': raw_match_data["away_team"]["name"],
-            'players': [player_to_dict(row) for _, row in away_players_df.iterrows()]
+            'players': away_players
         },
-        'frame_rate': metadata.frame_rate,  # ← From Kloppy (accurate)
-        'total_frames': len(dataset.records),  # ← From Kloppy (accurate)
-        'duration_minutes': len(dataset.records) / metadata.frame_rate / 60  # ← Calculated from Kloppy
+        'frame_rate': metadata.frame_rate,
+        'total_frames': len(dataset.records),
+        'duration_minutes': total_match_minutes
     }
 
 
@@ -431,7 +440,7 @@ def to_long_dataframe(dataset, match_id):
         
         COORDINATES: Automatically scales from normalized (0-1) to meters.
         
-        GK & POSITION: Uses SkillCorner JSON for reliable data (same as get_metadata).
+        GK, POSITION & SUB STATUS: Uses SkillCorner JSON for reliable data (same as get_metadata).
     """
     wide_df = dataset.to_df()
     
@@ -467,13 +476,26 @@ def to_long_dataframe(dataset, match_id):
     home_team = dataset.metadata.teams[0]
     away_team = dataset.metadata.teams[1]
     
-    # ========== GET RELIABLE is_gk AND position FROM SKILLCORNER JSON ==========
-    skillcorner_player_data = {}  # player_id -> {is_gk, position}
+    # ========== GET RELIABLE DATA FROM SKILLCORNER JSON ==========
+    skillcorner_player_data = {}  # player_id -> {is_gk, position, sub_status, etc.}
+    total_match_minutes = 90  # Default fallback
     
     try:
         meta_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_match.json"
         response = requests.get(meta_data_github_url)
         raw_match_data = response.json()
+        
+        # Calculate total match duration
+        total_match_minutes = sum(
+            period["duration_minutes"] 
+            for period in raw_match_data["match_periods"]
+        )
+        
+        # Calculate substitution status for all players
+        sub_status_lookup = calculate_substitution_status(
+            raw_match_data["players"], 
+            total_match_minutes
+        )
         
         # Extract players
         raw_match_df = pd.json_normalize(raw_match_data, max_level=2)
@@ -482,13 +504,20 @@ def to_long_dataframe(dataset, match_id):
             record_path="players"
         )
         
-        # Create lookup with is_gk AND position - RELIABLE!
+        # Create lookup with is_gk, position, AND sub_status - ALL RELIABLE!
         players_df["is_gk"] = players_df["player_role.acronym"] == "GK"
         
         for _, row in players_df.iterrows():
-            skillcorner_player_data[str(row["id"])] = {
+            player_id_str = str(row["id"])
+            sub_info = sub_status_lookup[row["id"]]
+            
+            skillcorner_player_data[player_id_str] = {
                 'is_gk': bool(row["is_gk"]),
-                'position': row["player_role.name"] if pd.notna(row.get("player_role.name")) else None
+                'position': row["player_role.name"] if pd.notna(row.get("player_role.name")) else None,
+                'sub_status': sub_info['sub_status'],
+                'minutes_played': sub_info['minutes_played'],
+                'start_frame': sub_info['start_frame'],
+                'end_frame': sub_info['end_frame']
             }
         
     except Exception as e:
@@ -505,12 +534,21 @@ def to_long_dataframe(dataset, match_id):
             # Use SkillCorner JSON if available, fallback to Kloppy
             if player_id_str in skillcorner_player_data:
                 # Use SkillCorner data - RELIABLE!
-                is_gk = skillcorner_player_data[player_id_str]['is_gk']
-                position = skillcorner_player_data[player_id_str]['position']
+                sc_data = skillcorner_player_data[player_id_str]
+                is_gk = sc_data['is_gk']
+                position = sc_data['position']
+                sub_status = sc_data['sub_status']
+                minutes_played = sc_data['minutes_played']
+                start_frame = sc_data['start_frame']
+                end_frame = sc_data['end_frame']
             else:
                 # Fallback to Kloppy metadata (unreliable)
                 is_gk = player.starting_position and 'Goalkeeper' in str(player.starting_position)
                 position = str(player.starting_position) if player.starting_position else None
+                sub_status = 'unknown'
+                minutes_played = None
+                start_frame = None
+                end_frame = None
             
             player_meta[player_id_str] = {
                 'player_id': player.player_id,
@@ -518,8 +556,12 @@ def to_long_dataframe(dataset, match_id):
                 'number': player.jersey_no,
                 'team_id': team.team_id,
                 'team_name': team.name,
-                'is_gk': is_gk,        # ← NOW RELIABLE!
-                'position': position,   # ← NOW RELIABLE!
+                'is_gk': is_gk,
+                'position': position,
+                'sub_status': sub_status,              # ← NEW!
+                'minutes_played': minutes_played,       # ← NEW!
+                'start_frame': start_frame,             # ← NEW!
+                'end_frame': end_frame,                 # ← NEW!
             }
     
     # Convert to long format
@@ -572,7 +614,7 @@ def to_long_dataframe(dataset, match_id):
                     'is_detected': True,
                 })
                 
-                # Add player metadata (now with reliable is_gk and position!)
+                # Add player metadata (now with is_gk, position, AND sub_status!)
                 if player_id in player_meta:
                     player_row.update(player_meta[player_id])
                 
@@ -588,6 +630,87 @@ def to_long_dataframe(dataset, match_id):
     long_df['away_team.id'] = away_team.team_id
     
     return long_df
+
+
+# ============================================================================
+# SUBSTITUTION STATUS HELPER
+# ============================================================================
+
+def calculate_substitution_status(players_data, total_match_minutes):
+    """
+    Calculate substitution status for all players.
+    
+    Args:
+        players_data: List of player dictionaries from SkillCorner JSON
+        total_match_minutes: Total match duration in minutes
+    
+    Returns:
+        dict: {
+            player_id: {
+                'sub_status': 'full90' | 'subbed_out' | 'subbed_in' | 'unused_sub',
+                'minutes_played': float,
+                'start_frame': int or None,
+                'end_frame': int or None
+            }
+        }
+    
+    Example:
+        >>> players = raw_match_data["players"]
+        >>> total_min = 98.4
+        >>> sub_status = calculate_substitution_status(players, total_min)
+        >>> sub_status[38673]
+        {'sub_status': 'subbed_out', 'minutes_played': 86.65, ...}
+    """
+    player_sub_status = {}
+    
+    for player in players_data:
+        player_id = player["id"]
+        start_time = player.get("start_time")
+        end_time = player.get("end_time")
+        playing_time = player.get("playing_time", {}).get("total")
+        
+        # Player didn't play
+        if start_time is None or playing_time is None:
+            player_sub_status[player_id] = {
+                'sub_status': 'unused_sub',
+                'minutes_played': 0,
+                'start_frame': None,
+                'end_frame': None
+            }
+            continue
+        
+        # Player played - get details
+        minutes_played = playing_time["minutes_played"]
+        start_frame = playing_time["start_frame"]
+        end_frame = playing_time["end_frame"]
+        
+        # Determine substitution status
+        if start_time == "00:00:00" and end_time is None:
+            # Started and finished the match
+            status = "full90"
+            
+        elif start_time == "00:00:00" and end_time is not None:
+            # Started but was substituted out
+            status = "subbed_out"
+            
+        elif start_time != "00:00:00":
+            # Substituted in during the match
+            status = "subbed_in"
+            
+        else:
+            # Unknown case (shouldn't happen)
+            status = "unknown"
+            print(f"⚠️  Unknown sub status for player {player_id}: "
+                  f"start={start_time}, end={end_time}")
+        
+        player_sub_status[player_id] = {
+            'sub_status': status,
+            'minutes_played': minutes_played,
+            'start_frame': start_frame,
+            'end_frame': end_frame
+        }
+    
+    return player_sub_status
 
 
 # ----------------------------------------------------------
