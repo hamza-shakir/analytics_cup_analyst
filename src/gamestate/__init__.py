@@ -69,12 +69,12 @@ from .metrics import (
 # Plots (flat)
 from .plots import (
     plot_average_positions,
-    compare_positions,
-    plot_shape_with_metrics,
+    plot_phase_comparison,
+    plot_defensive_blocks,
+    plot_game_state_evolution,
+    plot_team_compactness,
     plot_defensive_line,
     plot_channel_progression,
-    create_comparison_dashboard,
-    save_plot,
 )
 
 # Submodules (for modular imports)
@@ -133,12 +133,12 @@ __all__ = [
     
     # Plots (flat)
     "plot_average_positions",
-    "compare_positions",
-    "plot_shape_with_metrics",
+    "plot_phase_comparison",
+    "plot_defensive_blocks",
+    "plot_game_state_evolution",
+    "plot_team_compactness",
     "plot_defensive_line",
     "plot_channel_progression",
-    "create_comparison_dashboard",
-    "save_plot",
     
     # Submodules
     "context",
