@@ -56,6 +56,7 @@ def average_positions(
             - position: Playing position
             - is_gk: Boolean, True if goalkeeper
             - sub_status: 'full90', 'subbed_out', 'subbed_in', or 'unused_sub'
+            - team: 'home' or 'away'
             - avg_x: Average x-coordinate (in meters)
             - avg_y: Average y-coordinate (in meters)
             - std_x: Standard deviation of x
@@ -129,17 +130,27 @@ def average_positions(
         'number': 'first',
         'position': 'first',
         'is_gk': 'first',
-        'sub_status': 'first'
+        'sub_status': 'first',
+        'team_name': 'first'
     }).reset_index()
     
     # Merge
     result = player_stats.merge(player_meta, on='player_id', how='left')
+
+    # Determine team type (home or away) from team_name
+    home_team_name = df['home_team.name'].iloc[0] if 'home_team.name' in df.columns else None
+    if home_team_name and not result.empty:
+        result['team'] = result['team_name'].apply(
+            lambda x: 'home' if x == home_team_name else 'away'
+        )
+    else:
+        result['team'] = team  # Fallback to parameter
     
     # Rename and reorder columns
     result = result.rename(columns={'short_name': 'name'})
     result = result[[
         'player_id', 'name', 'number', 'position', 'is_gk', 'sub_status',
-        'avg_x', 'avg_y', 'std_x', 'std_y', 'frames_visible'
+        'team', 'avg_x', 'avg_y', 'std_x', 'std_y', 'frames_visible'
     ]]
     
     # Round for readability
@@ -372,16 +383,14 @@ def defensive_line_height(
             'defensive_line_spread': 0.0
         }
     
-    # Track last man DISTANCE from own goal for each frame
-    last_man_distances = []
+    # Track deepest defender's actual X coordinate for each frame
+    deepest_x_positions = []
     
     # After conditional orientation transformation:
     # - Team ALWAYS attacks left→right
     # - Team ALWAYS defends at X = -52.5 (left goal)
-    # - Deepest defender = min(X) = closest to -52.5
-    
-    own_goal_x = -52.5  # Always defends left goal after transformation
-    
+    # - Deepest defender = min(X) = closest to -52.5 (most negative)
+
     for frame_id in df['frame'].unique():
         frame_data = df[df['frame'] == frame_id]
         
@@ -391,14 +400,9 @@ def defensive_line_height(
         if len(outfield) > 0:
             # Deepest defender = minimum X (closest to left goal at -52.5)
             deepest_x = outfield['x'].min()
-            
-            # Calculate distance from own goal
-            # distance = deepest_x - (-52.5) = deepest_x + 52.5
-            distance_from_goal = deepest_x - own_goal_x
-            
-            last_man_distances.append(distance_from_goal)
+            deepest_x_positions.append(deepest_x)
     
-    if not last_man_distances:
+    if not deepest_x_positions:
         return {
             'deepest_defender_x': 0.0,
             'median_defensive_line_x': 0.0,
@@ -406,14 +410,14 @@ def defensive_line_height(
             'defensive_line_spread': 0.0
         }
     
-    # Calculate statistics on distances from own goal
-    distance_array = np.array(last_man_distances)
+    # Calculate statistics on actual X coordinates
+    x_array = np.array(deepest_x_positions)
     
     return {
-        'deepest_defender_x': round(float(distance_array.min()), 2),        # Minimum (dropped deepest)
-        'median_defensive_line_x': round(float(np.median(distance_array)), 2), # Median (typical position)
-        'avg_defensive_line_x': round(float(distance_array.mean()), 2),     # Mean (overall average)
-        'defensive_line_spread': round(float(distance_array.std()), 2) if len(distance_array) > 1 else 0.0
+        'deepest_defender_x': round(float(x_array.min()), 2),        # Most negative (deepest)
+        'median_defensive_line_x': round(float(np.median(x_array)), 2), # Median position
+        'avg_defensive_line_x': round(float(x_array.mean()), 2),     # Mean position
+        'defensive_line_spread': round(float(x_array.std()), 2) if len(x_array) > 1 else 0.0
     }
 
 
