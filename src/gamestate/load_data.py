@@ -4,6 +4,8 @@ load_data.py - Kloppy-native data loading WITH PHASES SUPPORT
 This module loads SkillCorner tracking, event, and phases data using kloppy.
 Returns kloppy dataset objects for maximum flexibility.
 Provides helpers to convert to pandas when needed.
+
+UPDATED: Dynamic error handling - no static blacklist of matches.
 """
 
 import pandas as pd
@@ -11,6 +13,7 @@ import numpy as np
 import requests
 from kloppy import skillcorner
 from kloppy.domain import Orientation
+from kloppy.exceptions import DeserializationError
 
 
 # ----------------------------------------------------------
@@ -18,29 +21,71 @@ from kloppy.domain import Orientation
 # ----------------------------------------------------------
 _dataset_cache = {}
 _event_cache = {}
-_phases_cache = {}  # NEW: Cache for phases data
+_phases_cache = {}
+
+
+# ----------------------------------------------------------
+# Known Working Matches (Reference Only)
+# ----------------------------------------------------------
+# This list was verified December 2025 and serves as a reference.
+# The code will attempt to load ANY match_id dynamically - if SkillCorner
+# fixes a previously broken match, it will work without code changes.
+
+KNOWN_WORKING_MATCHES = {
+    1886347: "Auckland FC vs Newcastle United Jets FC",
+    1899585: "Auckland FC vs Wellington Phoenix FC",
+    1925299: "Brisbane Roar FC vs Perth Glory Football Club",
+    1953632: "Central Coast Mariners FC vs Melbourne City FC",
+    1996435: "Sydney FC vs Adelaide United FC",
+    2006229: "Melbourne City FC vs Macarthur FC",
+    2013725: "Western United vs Sydney FC",
+    2015213: "Western United vs Auckland FC",
+    2017461: "Melbourne Victory FC vs Auckland FC"
+}
 
 
 # ----------------------------------------------------------
 # Core Loading Functions
 # ----------------------------------------------------------
 
-def load_tracking_dataset(match_id, only_alive=True, normalize_orientation=False):
+def load_tracking_dataset(
+    match_id,
+    only_alive=True,
+    normalize_orientation=False,
+    raise_on_error=False
+):
     """
-    Load SkillCorner tracking data using kloppy.
+    Load SkillCorner tracking data using kloppy with dynamic error handling.
+    
+    Attempts to load any match_id. If it fails due to data corruption or other
+    issues, returns None by default (or raises if raise_on_error=True).
+    
+    This approach allows SkillCorner to fix matches without requiring code updates.
     
     Args:
         match_id: Match identifier (int or str)
         only_alive: If True, only include frames where ball is in play
         normalize_orientation: If True, transform so home team always attacks left->right
+        raise_on_error: If True, raise exceptions; if False, return None on error
     
     Returns:
-        kloppy.TrackingDataset: Dataset with frames, metadata, etc.
+        kloppy.TrackingDataset if successful, None if loading fails (when raise_on_error=False)
     
     Example:
+        >>> # Graceful handling (default)
+        >>> dataset = load_tracking_dataset(2011166)
+        ⚠️  Failed to load match 2011166: DeserializationError
+        >>> print(dataset)
+        None
+        
+        >>> # Strict mode
+        >>> dataset = load_tracking_dataset(2011166, raise_on_error=True)
+        Exception: Failed to load tracking data...
+        
+        >>> # Working match
         >>> dataset = load_tracking_dataset(1886347)
         >>> print(f"Loaded {len(dataset.records)} frames")
-        >>> print(f"Home: {dataset.metadata.teams[0].name}")
+        Loaded 31522 frames
     """
     cache_key = f"{match_id}_{only_alive}_{normalize_orientation}"
     
@@ -51,16 +96,31 @@ def load_tracking_dataset(match_id, only_alive=True, normalize_orientation=False
     dataset = None
     last_error = None
     
-    # Method 1: Without coordinates parameter (newer kloppy versions)
     try:
+        # Method 1: Without coordinates parameter (newer kloppy versions >= 3.0)
         dataset = skillcorner.load_open_data(
             match_id=str(match_id),
             only_alive=only_alive
         )
+    except DeserializationError as e:
+        # Data corruption (malformed JSON/JSONL)
+        error_msg = (
+            f"⚠️  Failed to load match {match_id}: Data corruption (DeserializationError)\n"
+            f"   This match's data file appears to be malformed.\n"
+            f"   SkillCorner may fix this in a future update.\n"
+            f"   Try again later or use a different match."
+        )
+        
+        if raise_on_error:
+            raise Exception(error_msg) from e
+        else:
+            print(error_msg)
+            return None
+            
     except Exception as e:
         last_error = e
         
-        # Method 2: With coordinates parameter (older kloppy versions)
+        # Method 2: With coordinates parameter (older kloppy versions < 3.0)
         try:
             dataset = skillcorner.load_open_data(
                 match_id=str(match_id),
@@ -68,26 +128,47 @@ def load_tracking_dataset(match_id, only_alive=True, normalize_orientation=False
                 coordinates="skillcorner"
             )
             last_error = None
+        except DeserializationError as e2:
+            # Data corruption with old method too
+            error_msg = (
+                f"⚠️  Failed to load match {match_id}: Data corruption (DeserializationError)\n"
+                f"   This match's data file appears to be malformed.\n"
+                f"   SkillCorner may fix this in a future update."
+            )
+            
+            if raise_on_error:
+                raise Exception(error_msg) from e2
+            else:
+                print(error_msg)
+                return None
+                
         except Exception as e2:
             last_error = e2
     
-    # If both methods failed, raise clear error
+    # If both methods failed
     if dataset is None:
-        error_msg = f"""
-Failed to load tracking data for match {match_id}.
-
-Error: {str(last_error)}
-
-Possible solutions:
-1. Update kloppy: pip install --upgrade kloppy
-2. Check match ID exists: https://github.com/SkillCorner/opendata
-3. Check your internet connection
-
-Kloppy version issues:
-- If using kloppy >= 3.0: Should work without 'coordinates' parameter
-- If using kloppy < 3.0: May need 'coordinates="skillcorner"' parameter
-"""
-        raise Exception(error_msg)
+        error_type = type(last_error).__name__
+        error_msg = (
+            f"⚠️  Failed to load match {match_id}: {error_type}\n"
+            f"   Error details: {str(last_error)}\n"
+            f"   \n"
+            f"   Possible causes:\n"
+            f"   - Match ID doesn't exist in SkillCorner open data\n"
+            f"   - Network/connection issue\n"
+            f"   - Kloppy version incompatibility\n"
+            f"   \n"
+            f"   Solutions:\n"
+            f"   1. Check match exists: https://github.com/SkillCorner/opendata\n"
+            f"   2. Check internet connection\n"
+            f"   3. Update kloppy: pip install --upgrade kloppy\n"
+            f"   4. Use list_known_matches() to see verified working matches"
+        )
+        
+        if raise_on_error:
+            raise Exception(error_msg) from last_error
+        else:
+            print(error_msg)
+            return None
     
     # Normalize orientation if requested
     if normalize_orientation:
@@ -99,15 +180,17 @@ Kloppy version issues:
     return dataset
 
 
-def load_event_data(match_id):
+def load_event_data(match_id, raise_on_error=False):
     """
     Load SkillCorner dynamic events CSV.
     
     Args:
         match_id: Match identifier
+        raise_on_error: If True, raise exceptions; if False, return empty DataFrame
     
     Returns:
         pandas.DataFrame: Events with scores, game states, etc.
+        Returns empty DataFrame if loading fails (when raise_on_error=False)
     
     Note:
         This loads the dynamic_events.csv which contains score changes
@@ -119,13 +202,22 @@ def load_event_data(match_id):
     event_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_dynamic_events.csv"
     
     try:
-        events_df = pd.read_csv(event_url)
-    except:
-        print(f"Warning: Could not load events for match {match_id}")
-        return pd.DataFrame()
+        events_df = pd.read_csv(event_url, low_memory=False)
+    except Exception as e:
+        error_msg = f"⚠️  Could not load events for match {match_id}: {type(e).__name__}"
+        
+        if raise_on_error:
+            raise Exception(error_msg) from e
+        else:
+            print(error_msg)
+            return pd.DataFrame()
     
     # Get team info from tracking dataset
-    dataset = load_tracking_dataset(match_id)
+    dataset = load_tracking_dataset(match_id, raise_on_error=raise_on_error)
+    
+    if dataset is None:
+        return pd.DataFrame()
+    
     home_team = dataset.metadata.teams[0]
     away_team = dataset.metadata.teams[1]
     
@@ -149,15 +241,17 @@ def load_event_data(match_id):
     return events_df
 
 
-def load_phases_data(match_id):
+def load_phases_data(match_id, raise_on_error=False):
     """
     Load SkillCorner phases-of-play CSV.
     
     Args:
         match_id: Match identifier
+        raise_on_error: If True, raise exceptions; if False, return empty DataFrame
     
     Returns:
         pandas.DataFrame: Phases with tactical context, spatial data, outcomes
+        Returns empty DataFrame if loading fails (when raise_on_error=False)
     
     Columns include:
         Possession:
@@ -208,12 +302,6 @@ def load_phases_data(match_id):
         ...     (phases['team_in_possession_phase_type'] == 'build_up')
         ... ]
         >>> print(f"Home team build-up phases: {len(home_buildups)}")
-        >>> 
-        >>> # Analyze defensive phases
-        >>> high_blocks = phases[
-        ...     phases['team_out_of_possession_phase_type'] == 'high_block'
-        ... ]
-        >>> print(f"High block defensive phases: {len(high_blocks)}")
     
     Note:
         Phases data may not be available for all matches.
@@ -230,15 +318,27 @@ def load_phases_data(match_id):
         phases_df = pd.read_csv(phases_url)
         print(f"✅ Loaded {len(phases_df)} phases for match {match_id}")
     except Exception as e:
-        print(f"⚠️  Warning: Could not load phases data for match {match_id}")
-        print(f"   Error: {str(e)[:100]}")
-        print(f"   Note: Phases data may not be available for all matches")
-        print(f"   Phase-based filters will return empty segments for this match")
-        return pd.DataFrame()
+        error_msg = (
+            f"⚠️  Could not load phases data for match {match_id}\n"
+            f"   Error: {type(e).__name__}: {str(e)[:100]}\n"
+            f"   Note: Phases data may not be available for all matches\n"
+            f"   Phase-based filters will return empty segments for this match"
+        )
+        
+        if raise_on_error:
+            raise Exception(error_msg) from e
+        else:
+            print(error_msg)
+            return pd.DataFrame()
     
     # Get team info from tracking dataset
     try:
-        dataset = load_tracking_dataset(match_id)
+        dataset = load_tracking_dataset(match_id, raise_on_error=raise_on_error)
+        
+        if dataset is None:
+            _phases_cache[match_id] = phases_df
+            return phases_df
+            
         home_team = dataset.metadata.teams[0]
         away_team = dataset.metadata.teams[1]
         
@@ -251,7 +351,7 @@ def load_phases_data(match_id):
         print(f"   Home: {home_team.name}")
         print(f"   Away: {away_team.name}")
     except Exception as e:
-        print(f"⚠️  Warning: Could not add team metadata: {e}")
+        print(f"⚠️  Could not add team metadata: {e}")
     
     # Cache and return
     _phases_cache[match_id] = phases_df
@@ -270,6 +370,7 @@ def get_metadata(match_id):
     
     Returns:
         dict: Contains teams, players (with sub status), frame_rate, etc.
+        Returns None if match cannot be loaded
     
     Example:
         >>> meta = get_metadata(1886347)
@@ -283,13 +384,22 @@ def get_metadata(match_id):
     
     # Load Kloppy dataset for frame info
     dataset = load_tracking_dataset(match_id)
+    
+    if dataset is None:
+        print(f"⚠️  Cannot get metadata: match {match_id} failed to load")
+        return None
+    
     metadata = dataset.metadata
     
     # Load SkillCorner JSON for player data
     meta_data_github_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_match.json"
     
-    response = requests.get(meta_data_github_url)
-    raw_match_data = response.json()
+    try:
+        response = requests.get(meta_data_github_url)
+        raw_match_data = response.json()
+    except Exception as e:
+        print(f"⚠️  Could not load match JSON: {e}")
+        return None
     
     # Calculate total match duration
     total_match_minutes = sum(
@@ -368,12 +478,16 @@ def list_players(match_id, team=None):
     
     Returns:
         pandas.DataFrame: Player information
+        Returns empty DataFrame if match cannot be loaded
     
     Example:
         >>> players = list_players(1886347, team='home')
         >>> print(players[['jersey_no', 'name', 'position']])
     """
     meta = get_metadata(match_id)
+    
+    if meta is None:
+        return pd.DataFrame()
     
     players = []
     
@@ -399,24 +513,11 @@ def list_players(match_id, team=None):
 
 
 # ----------------------------------------------------------
-# DataFrame Conversion Helpers
+# DataFrame Conversion Helpers (UNCHANGED)
 # ----------------------------------------------------------
 
 def to_wide_dataframe(dataset):
-    """
-    Convert kloppy dataset to wide-format DataFrame.
-    
-    Wide format: 1 row per frame, columns for each player (player_id_x, player_id_y)
-    
-    Args:
-        dataset: kloppy TrackingDataset
-    
-    Returns:
-        pandas.DataFrame: Wide format tracking data
-    
-    Note:
-        This is kloppy's native format. Most efficient for frame-based operations.
-    """
+    """Convert kloppy dataset to wide-format DataFrame."""
     return dataset.to_df()
 
 
@@ -633,7 +734,7 @@ def to_long_dataframe(dataset, match_id):
 
 
 # ============================================================================
-# SUBSTITUTION STATUS HELPER
+# SUBSTITUTION STATUS HELPER (UNCHANGED)
 # ============================================================================
 
 def calculate_substitution_status(players_data, total_match_minutes):
@@ -731,6 +832,10 @@ def print_match_info(match_id):
     """
     meta = get_metadata(match_id)
     
+    if meta is None:
+        print(f"⚠️  Cannot print match info: match {match_id} failed to load")
+        return
+    
     print(f"\n{'='*60}")
     print(f"MATCH INFO - ID: {match_id}")
     print(f"{'='*60}")
@@ -740,6 +845,58 @@ def print_match_info(match_id):
     print(f"Home players: {len(meta['home_team']['players'])}")
     print(f"Away players: {len(meta['away_team']['players'])}")
     print(f"{'='*60}\n")
+
+
+# ----------------------------------------------------------
+# Utility Functions
+# ----------------------------------------------------------
+
+def list_known_matches():
+    """Print list of known working matches (last verified December 2025)."""
+    print("Known Working SkillCorner Matches (Last Verified: December 2025):")
+    print("=" * 70)
+    
+    for match_id, description in sorted(KNOWN_WORKING_MATCHES.items()):
+        print(f"  {match_id}: {description}")
+    
+    print(f"\nTotal: {len(KNOWN_WORKING_MATCHES)} verified working matches")
+    print("\nNote: This list is for reference. The code will attempt to load ANY")
+    print("match_id - if SkillCorner adds new matches or fixes broken ones,")
+    print("they will work automatically without code updates.")
+    print("\nVisit: https://github.com/SkillCorner/opendata for latest data")
+
+
+def validate_match_id(match_id, attempt_load=False):
+    """
+    Check if match_id is likely to be loadable.
+    
+    Args:
+        match_id: Match identifier to validate
+        attempt_load: If True, actually try loading to verify
+    
+    Returns:
+        True if match is in known working list (or loads successfully),
+        False otherwise
+    
+    Example:
+        >>> # Quick check against known list
+        >>> validate_match_id(1886347)
+        True
+        
+        >>> # Actually attempt to load
+        >>> validate_match_id(2011166, attempt_load=True)
+        False  # (fails to load)
+    """
+    if not attempt_load:
+        # Just check if in known working list
+        return match_id in KNOWN_WORKING_MATCHES
+    else:
+        # Actually try to load
+        dataset = load_tracking_dataset(
+            match_id=match_id,
+            raise_on_error=False
+        )
+        return dataset is not None
 
 
 # ----------------------------------------------------------
@@ -757,6 +914,11 @@ def load_enriched_tracking_data(match_id):
     
     Returns:
         pandas.DataFrame: Long format tracking data
+        Returns empty DataFrame if match cannot be loaded
     """
     dataset = load_tracking_dataset(match_id)
+    
+    if dataset is None:
+        return pd.DataFrame()
+    
     return to_long_dataframe(dataset, match_id)
