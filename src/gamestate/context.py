@@ -33,10 +33,16 @@ def summary(match_id):
     
     Returns:
         pandas.DataFrame: Two-row summary (home, away)
+        Returns empty DataFrame if match cannot be loaded
     """
-    # Load data
-    dataset = load_tracking_dataset(match_id)
-    events_df = load_event_data(match_id)
+    # Load data with error handling
+    dataset = load_tracking_dataset(match_id=match_id)
+    
+    if dataset is None:
+        print(f"⚠️  Cannot generate summary: match {match_id} failed to load")
+        return pd.DataFrame()
+    
+    events_df = load_event_data(match_id=match_id)
     
     # Get team info from kloppy metadata
     home_team = dataset.metadata.teams[0]
@@ -96,6 +102,7 @@ def score_progression(match_id):
     
     Returns:
         pandas.DataFrame: Goal events with scores and timing
+        Returns empty DataFrame if match cannot be loaded
     
     Example:
         >>> goals = score_progression(1886347)
@@ -106,13 +113,18 @@ def score_progression(match_id):
         2    Auckland FC                2                0   Newcastle...            88        53812
     """
     # Load event data
-    events_df = load_event_data(match_id)
+    events_df = load_event_data(match_id=match_id)
     
     if events_df.empty:
+        print(f"⚠️  No event data available for match {match_id}")
         return pd.DataFrame()
     
     # Get team names from metadata
-    meta = get_metadata(match_id)
+    meta = get_metadata(match_id=match_id)
+    
+    if meta is None:
+        print(f"⚠️  Cannot get metadata for match {match_id}")
+        return pd.DataFrame()
     
     # Select relevant columns
     columns = [
