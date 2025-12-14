@@ -941,7 +941,7 @@ def plot_defensive_line(
     if avg_line is not None:
         ax.axvline(
             avg_line,
-            color='#E63946',  # Red
+            color='#F4A300',  # Orange
             linestyle=':',
             linewidth=3,
             alpha=0.8,
@@ -952,7 +952,7 @@ def plot_defensive_line(
     if median_line is not None:
         ax.axvline(
             median_line,
-            color='#F4A300',  # Orange
+            color="#00E8F4",  # Cyan
             linestyle=':',
             linewidth=3,
             alpha=0.8,
@@ -963,7 +963,7 @@ def plot_defensive_line(
     if deepest is not None:
         ax.axvline(
             deepest,
-            color="#E355FF",  # Yellow
+            color="#E63946",  # Red
             linestyle=':',
             linewidth=3,
             alpha=0.8,
