@@ -315,7 +315,7 @@ def load_phases_data(match_id, raise_on_error=False):
     phases_url = f"https://raw.githubusercontent.com/SkillCorner/opendata/refs/heads/master/data/matches/{match_id}/{match_id}_phases_of_play.csv"
     
     try:
-        phases_df = pd.read_csv(phases_url)
+        phases_df = pd.read_csv(phases_url, low_memory=False)
         print(f"✅ Loaded {len(phases_df)} phases for match {match_id}")
     except Exception as e:
         error_msg = (
