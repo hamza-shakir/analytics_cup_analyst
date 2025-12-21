@@ -68,6 +68,47 @@ FIGURE_SIZES = {
 
 
 # ============================================================================
+# HELPER: SUBPLOT SCALING
+# ============================================================================
+
+def calculate_subplot_scale(
+        ncols: int = 1,
+        nrows: int = 1,
+        total_figwidth: int = 14):
+    """
+    Calculate scaling factor for markers/text in subplot grids.
+    
+    Args:
+        ncols: Number of columns in subplot grid
+        nrows: Number of rows in subplot grid  
+        base_figwidth: Total figure width
+        
+    Returns:
+        float: Scale factor (1.0 = no scaling for single plot)
+        
+    Example:
+        >>> scale = calculate_subplot_scale(ncols=3, nrows=1, base_figwidth=18)
+        >>> scaled_marker_size = int(1000 * scale)
+    """
+    if ncols == 1 and nrows == 1:
+        return 1.0
+    
+    # Calculate effective width per subplot
+    subplot_width = total_figwidth / ncols
+    
+    # Base single plot width is ~14 inches (from FIGURE_SIZES['single'])
+    base_single_width = 14
+    
+    # Scale proportionally with less aggressive power
+    scale = (subplot_width / base_single_width) ** 0.65
+    
+    # Clamp minimum scale to prevent too-small markers
+    scale = max(scale, 0.4)
+    
+    return scale
+
+
+# ============================================================================
 # HELPER: CREATE PITCH
 # ============================================================================
 
@@ -135,12 +176,14 @@ def plot_average_positions(
     pitch_color: str = None,
     line_color: str = None,
     team_color: str = None,
-    marker_size: int = 1000,
-    number_size: int = 16,
+    marker_size: int = None,
+    number_size: int = None,
     show_numbers: bool = True,
     show_legend: bool = True,
     figsize: Tuple[int, int] = (14, 10),
-    ax: Optional[plt.Axes] = None
+    ax: Optional[plt.Axes] = None,
+    ncols: int = 1,
+    nrows: int = 1
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plot average player positions from a positions DataFrame.
@@ -162,12 +205,14 @@ def plot_average_positions(
         pitch_color: Pitch background color (if None, uses design default)
         line_color: Pitch line color (if None, uses design default)
         team_color: Team marker color (if None, auto-detects from DataFrame)
-        marker_size: Size of player markers in points
-        number_size: Font size for jersey numbers
+        marker_size: Size of player markers (if None, auto-scaled based on ncols/nrows)
+        number_size: Font size for jersey numbers (if None, auto-scaled based on ncols/nrows)
         show_numbers: If True, display jersey numbers on markers
         show_legend: If True, show legend explaining marker colors
         figsize: Figure size as (width, height) in inches
         ax: Matplotlib axes to plot on (if None, creates new figure)
+        ncols: Number of columns in subplot grid (for auto-scaling)
+        nrows: Number of rows in subplot grid (for auto-scaling)
     
     Returns:
         Tuple of (fig, ax): Matplotlib figure and axes objects
@@ -201,6 +246,23 @@ def plot_average_positions(
         pitch_color = COLORS['pitch_green']
     if line_color is None:
         line_color = COLORS['pitch_lines']
+    
+    # Auto-scale marker and number sizes based on subplot configuration
+    # If ax is provided, get the actual figure width from it
+    if ax is not None and ncols > 1:
+        actual_figwidth = ax.figure.get_figwidth()
+        scale = calculate_subplot_scale(ncols, nrows, actual_figwidth)
+    else:
+        scale = calculate_subplot_scale(ncols, nrows, figsize[0])
+    
+    if marker_size is None:
+        marker_size = int(PLAYER_SPECS['size'] * scale)
+    if number_size is None:
+        number_size = int(PLAYER_SPECS['number_size'] * scale)
+    
+    # Debug print (remove after testing)
+    # if ncols > 1:
+    #     print(f"🔍 Debug: ncols={ncols}, figwidth={actual_figwidth if ax else figsize[0]}, scale={scale:.3f}, marker_size={marker_size}")
     
     # Validate input
     if positions_df.empty:
@@ -275,7 +337,7 @@ def plot_average_positions(
             edgecolors=edge_color,
             linewidths=edge_width,
             alpha=PLAYER_SPECS['alpha'],
-            zorder=10  # Match old code
+            zorder=10
         )
         
         # Add jersey number (if enabled)
@@ -285,11 +347,11 @@ def plot_average_positions(
                 player['avg_y'],
                 str(int(player['number'])),
                 fontsize=number_size,
-                color='black',  # Always black
+                color='black',
                 weight=PLAYER_SPECS['number_weight'],
                 ha='center',
                 va='center',
-                zorder=16  # Match old code
+                zorder=16
             )
     
     # Add legend
@@ -334,16 +396,6 @@ def plot_average_positions(
         )
     
     # Add title
-    if title is None:
-        # Auto-generate title
-        possession_str = {
-            'all': 'All Frames',
-            'ip': 'In Possession',
-            'oop': 'Out of Possession'
-        }.get(possession, possession)
-        
-        title = f"Average Positions - {possession_str}"
-    
     ax.set_title(title, fontsize=16, fontweight='bold', pad=15)
     
     return fig, ax
@@ -363,28 +415,6 @@ def plot_phase_comparison(
 ) -> Tuple[plt.Figure, List[plt.Axes]]:
     """
     Compare average positions across multiple phases side-by-side.
-    
-    Args:
-        match_id: Match identifier
-        team: 'home' or 'away'
-        phases: List of phase types to compare (default: ['build_up', 'create', 'finish'])
-        possession: 'all', 'ip', or 'oop'
-        show_thirds: If True, show pitch thirds dividers
-        figsize: Figure size (if None, auto-calculated)
-    
-    Returns:
-        Tuple of (fig, axes): Matplotlib figure and list of axes
-    
-    Example:
-        >>> import gamestate as gs
-        >>> 
-        >>> # Compare attacking phases
-        >>> fig, axes = gs.plot_phase_comparison(
-        ...     1886347,
-        ...     'home',
-        ...     phases=['build_up', 'create', 'finish']
-        ... )
-        >>> plt.show()
     """
     from .segments import get_full_match
     from .filters import filter_by_ip_phase
@@ -404,7 +434,7 @@ def plot_phase_comparison(
     # Create subplots
     fig, axes = plt.subplots(1, len(phases), figsize=figsize, facecolor='white')
     
-    # Handle single phase case (axes won't be array)
+    # Handle single phase case
     if len(phases) == 1:
         axes = [axes]
     
@@ -430,15 +460,16 @@ def plot_phase_comparison(
         # Create phase title
         phase_title = phase.replace('_', ' ').title()
         
-        # Plot with scaled-down sizes for multi-plot layout
+        # DON'T pass figsize - let it use the ax size
         plot_average_positions(
             positions_df=positions,
             title=phase_title,
             show_thirds=show_thirds,
-            show_legend=(ax == axes[0]),  # Only show legend on first plot
-            marker_size=500,  # Smaller than default 1000
-            number_size=8,   # Smaller than default 16
-            ax=ax
+            show_legend=(ax == axes[0]),
+            ax=ax,
+            ncols=len(phases),
+            nrows=1
+            # figsize removed!
         )
     
     # Add overall title
@@ -527,15 +558,15 @@ def plot_defensive_blocks(
         # Create block title
         block_title = block.replace('_', ' ').title()
         
-        # Plot with scaled-down sizes for multi-plot layout
+        # Plot with auto-scaled sizes for multi-plot layout
         plot_average_positions(
             positions_df=positions,
             title=block_title,
             show_thirds=False,
             show_legend=(ax == axes[0]),
-            marker_size=500,  # Smaller than default 1000
-            number_size=8,   # Smaller than default 16
-            ax=ax
+            ax=ax,
+            ncols=len(blocks),  # Auto-scale based on number of subplots
+            nrows=1,
         )
     
     # Add overall title
