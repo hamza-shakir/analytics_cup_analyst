@@ -1,0 +1,29 @@
+# Core dependencies for Phase-Based Tactical Analytics Toolkit
+# SkillCorner × PySport Analytics Cup Submission
+
+# Data manipulation
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Tracking data processing (PySport ecosystem)
+kloppy>=3.18.0
+
+# Visualization
+matplotlib>=3.7.0
+mplsoccer>=1.3.0
+
+# Statistical analysis
+scipy>=1.11.0
+
+# HTTP requests (for loading SkillCorner data)
+requests>=2.31.0
+
+# Optional: Jupyter notebook support
+jupyter>=1.0.0
+ipython>=8.12.0
+notebook>=7.0.0
+
+# Development dependencies (optional)
+# pytest>=7.4.0
+# black>=23.0.0
+# flake8>=6.0.0
