@@ -1,32 +1,35 @@
 """
-gamestate — Game State Football Analysis Package
+Phase-Based Tactical Analytics Toolkit
+SkillCorner × PySport Analytics Cup Submission
 
-Provides tools for:
-- Loading SkillCorner tracking and event data
-- Computing team and player analytics
-- Match context and segmentation
+Context-aware segmentation for football tracking data analysis.
 """
 
-# Core data loading (keep grouped)
+__version__ = "1.0.0"
+
+# ============================================================================
+# DATA LOADING
+# ============================================================================
 from .load_data import (
     load_tracking_dataset,
     load_event_data,
     load_phases_data,
     get_metadata,
     list_players,
-    to_wide_dataframe,
-    to_long_dataframe,
     print_match_info,
-    load_enriched_tracking_data,  # Backward compatibility
 )
 
-# Match context (flat)
+# ============================================================================
+# MATCH CONTEXT
+# ============================================================================
 from .context import (
     summary,
-    score_progression
+    score_progression,
 )
 
-# Segmentation (flat)
+# ============================================================================
+# SEGMENTATION
+# ============================================================================
 from .segments import (
     get_full_match,
     segment_by_game_state,
@@ -38,7 +41,9 @@ from .segments import (
     all_goals_context,
 )
 
-# Filters
+# ============================================================================
+# SEGMENTATION
+# ============================================================================
 from .filters import (
     filter_by_ip_phase,
     filter_by_oop_phase,
@@ -46,7 +51,9 @@ from .filters import (
     filter_by_game_state,
 )
 
-# Helper
+# ============================================================================
+# HELPERS (for SEGMENTATION AND FILTERING)
+# ============================================================================
 from .helpers import (
     has_frames,
     get_frame_count,
@@ -56,7 +63,9 @@ from .helpers import (
     diagnose_filters,
 )
 
-# Metrics (flat)
+# ============================================================================
+# METRICS
+# ============================================================================
 from .metrics import (
     average_positions,
     team_compactness,
@@ -66,7 +75,9 @@ from .metrics import (
     metric_summary,
 )
 
-# Plots (flat)
+# ============================================================================
+# VISUALIZATIONS
+# ============================================================================
 from .plots import (
     plot_average_positions,
     plot_phase_comparison,
@@ -83,6 +94,10 @@ from . import segments
 from . import metrics
 from . import plots
 
+# ============================================================================
+# PUBLIC API
+# ============================================================================
+
 __all__ = [
     # Data loading (grouped namespace)
     "load_tracking_dataset",
@@ -93,11 +108,10 @@ __all__ = [
     "to_wide_dataframe",
     "to_long_dataframe",
     "print_match_info",
-    "load_enriched_tracking_data",
     
     # Context (flat)
     "summary",
-    "score_progression"
+    "score_progression",
     
     # Segmentation (flat)
     "get_full_match",
