@@ -1,63 +1,73 @@
-# SkillCorner X PySport Analytics Cup
-This repository contains the submission template for the SkillCorner X PySport Analytics Cup **Analyst Track**. 
-Your submission for the **Analyst Track** should be on the `main` branch of your own fork of this repository.
+# SkillCorner × PySport Analytics Cup - Analyst Track Submission
 
-Find the Analytics Cup [**dataset**](https://github.com/SkillCorner/opendata/tree/master/data) and [**tutorials**](https://github.com/SkillCorner/opendata/tree/master/resources) on the [**SkillCorner Open Data Repository**](https://github.com/SkillCorner/opendata).
+### Gamestate Tactical Analytics Toolkit
 
-## Submitting
-Make sure your `main` branch contains:
-
-1. A single Jupyter Notebook in the root of this repository called `submission.ipynb`
-    - This Juypter Notebook can not contain more than 2000 words.
-    - All other code should also be contained in this repository, but should be imported into the notebook from the `src` folder.
-
-
-or,
-
-
-1. A single Python file in the root of this repository called `main.py`
-    - This file should not contain more than 2000 words.
-    - All other code should also be contained in this repository, but should be imported into the notebook from the `src` folder.
-
-or, 
-
-
-1. A publicly accessible web app or website written in a language of your choice (e.g. Javascript)
-
-    - Your code should follow a clear and well defined structure.
-    - All other code should also be contained in this repository.
-    - The URL to the webapp should be included at the bottom of the read me under **URL to Web App / Website**
-
-
-2. An abstract of maximum 300 words that follows the **Analyst Track Abstract Template**.
-3. Add a URL to a screen recording video of maximum 60 seconds that shows your work. Add it under the **Video URL** Section below. (Use YouTube, or any other site to share this video).
-4. Submit your GitHub repository on the [Analytics Cup Pretalx page](https://pretalx.pysport.org)
-
-Finally:
-- Make sure your GitHub repository does **not** contain big data files. The tracking data should be loaded directly from the [Analytics Cup Data GitHub Repository](https://github.com/SkillCorner/opendata). For more information on how to load the data directly from GitHub please see this [Jupyter Notebook](https://github.com/SkillCorner/opendata/blob/master/resources/getting-started-skc-tracking-kloppy.ipynb).
-- Make sure the `submission.ipynb` notebook runs on a clean environment, or
-- Provide clear and concise instructions how to run the `main.py` (e.g. `streamlit run main.py`) if applicable in the **Run Instructions** Section below.
-- Providing a URL to a publically accessible webapp or website with a running version of your submission is mandatory when choosing to submit in a different language then Python, it is encouraged, but optional when submitting in Python.
-
-_⚠️ Not adhering to these submission rules and the [**Analytics Cup Rules**](https://pysport.org/analytics-cup/rules) may result in a point deduction or disqualification._
+**Author:** Hamza Adhnan Shakir
 
 ---
 
-## Analyst Track Abstract Template (max. 300 words)
-#### Introduction
+## Introduction
 
-#### Usecase(s)
+When the scoreline changes, tactics change. But how?
 
-#### Potential Audience
+Taking the lead provides structural advantage—teams can sit deeper, absorb pressure, exploit transitions. Conceding forces urgency—opponents push higher, commit bodies forward, accept defensive risk. What's overlooked is the duality: both sides adapt simultaneously.
+
+The team that scores faces a choice: maintain aggression or shift to game management? The trailing team confronts mounting pressure: maintain structure or abandon shape in desperation? Responses vary dramatically.
+
+Standard analytics miss this. Whole-match averages treat 90 minutes as uniform. Even basic game state splits barely scratch the surface.
+
+This toolkit provides granularity: **in-possession vs out-of-possession phases**, **time-segmented analysis**, **score-differential contexts**. Instant segmentation revealing how teams *actually* respond under different contexts.
+
+---
+
+## Use Case(s)
+
+**Pre-Match Opponent Analysis:**  
+Build tactical profiles across game states. How do they defend when trailing? Does their line push higher at 0-2 versus 0-1? Revealing exploitable patterns.
+
+**Post-Match Team Review:**  
+Evaluate execution across game states. Did the team maintain compactness after conceding? Identify coached responses versus reactive chaos.
+
+**Comparative Preparation:**  
+Match opponent vulnerabilities to your strengths. Target specific game state contexts for preparation.
+
+---
+
+## Potential Audience
+
+**Coaches & Analysts:** Data-driven evidence of shape evolution and tactical adjustments across game states.
+
+**Researchers:** Standardized frameworks for studying tactical decision-making and momentum effects.
 
 ---
 
 ## Video URL
 
+**[video](https://www.loom.com/share/9f77e4a51e5643608f91c9705aa66153)**
+
 ---
 
 ## Run Instructions
 
----
+### Prerequisites
+Python >= 3.9
 
-## [Optional] URL to Web App / Website
+### Installation
+```bash
+git clone https://github.com/hamza-shakir/analytics_cup_analyst.git
+cd analytics_cup_analyst
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Verification
+```python
+python -c "import gamestate as gs; print('✅ Installation successful')"
+```
+
+### Running
+```bash
+jupyter notebook submission.ipynb
+```
+
+---
